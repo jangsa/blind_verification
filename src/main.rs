@@ -1,13 +1,26 @@
-use actix_web::{get, web, App, HttpServer, Responder, HttpResponse};
+use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct Info {
+    sub: String,
+    name: String,
+    age: i32,
+}
 
 #[get("/")]
 async fn top() -> impl Responder {
     HttpResponse::Ok().body("Hello Top Page!")
 }
 
-#[get("/echo")]
+#[post("/echo")]
 async fn echo(req_body: String) -> impl Responder {
     HttpResponse::Ok().body(req_body)
+}
+
+#[post("/json")]
+async fn json(info: web::Json<Info>) -> impl Responder {
+    format!("Welcome, {}! Your subject id is {}, and age is {}", info.name, info.sub, info.age)
 }
 
 #[get("/{id}/{name}")]
