@@ -18,11 +18,11 @@ async fn index(web::Path((id, name)): web::Path<(u32, String)>) -> impl Responde
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
 
-    let addr_leader: &str = "127.0.0.1:8080";
-    let addr: &str = "127.0.0.1:8081";
+    let addr_leader: &str = "0.0.0.0:8080";
+    let addr: &str = "0.0.0.0:8081";
 
     if let Some(mode) = std::env::args().nth(1) {
-        println!("Running \"leader mode\"");
+        println!("Running \"leader mode\"@port8080");
 
         if mode == "leader" {
             HttpServer::new(||
@@ -34,7 +34,7 @@ async fn main() -> std::io::Result<()> {
                 .run()
                 .await
         } else {
-            println!("Running \"default mode\". (arg = {})", mode);
+            println!("Running \"default mode\"@port8081. (arg = {})", mode);
             HttpServer::new(||
                             App::new()
                             .service(top)
@@ -46,7 +46,7 @@ async fn main() -> std::io::Result<()> {
         }
 
     } else {
-        println!("No arg. Running \"default mode\"");
+        println!("No arg. Running \"default mode\"@port8081");
         HttpServer::new(||
                         App::new()
                         .service(top)
