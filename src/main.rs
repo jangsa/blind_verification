@@ -52,6 +52,7 @@ async fn main() -> std::io::Result<()> {
                             App::new()
                             .service(top)
                             .service(echo)
+                            .service(json)
                             )
                 .bind(addr)?
                 .run()
@@ -64,6 +65,7 @@ async fn main() -> std::io::Result<()> {
                         App::new()
                         .service(top)
                         .service(echo)
+                        .service(json)
                         )
             .bind(addr)?
             .run()
