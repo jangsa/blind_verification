@@ -2,30 +2,26 @@ use std::collections::HashMap;
 use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
+use rusqlite::{params, Connection, Result};
 
-// Verified Credential VC01's Format
-#[derive(Deserialize)]
-struct Vc01In04 {
+static mut db_conn: Option<rusqlite::Connection> = None;
+
+#[derive(Debug)]
+struct Person {
+    id: i32,
     name: String,
-    age: i32,
-    job: String,
+    data: Option<Vec<u8>>,
 }
 
 #[derive(Deserialize)]
-struct Vc01In03 {
-    profile: Vc01In04,
+struct SyncCredential {
+    gid: String,
+    //pwd: String,
 }
 
+// Input (VC/Verified Credential) Formats
 #[derive(Deserialize)]
-struct Vc01In02 {
-    credentialSubject: Vc01In03,
-
-    #[serde(flatten)]
-    extra: HashMap<String, Value>,
-}
-
-#[derive(Deserialize)]
-struct Vc01In01 {
+struct VcCommon {
     sub: String,
     jti: String,
     iss: String,
@@ -33,39 +29,156 @@ struct Vc01In01 {
     iat: u32,
     exp: u32,
     nonce: String,
-    vc: Vc01In02,
 }
 
-// Output Json Format of "json" path
+#[derive(Deserialize)]
+struct VcProfile {
+    #[serde(flatten)]
+    common: VcCommon,
+
+    vc: VcCredProfile,
+}
+#[derive(Deserialize)]
+struct VcCredProfile {
+    credentialSubject: Vc01PProfile,
+
+    #[serde(flatten)]
+    extra: HashMap<String, Value>,
+}
+#[derive(Deserialize)]
+struct Vc01PProfile {
+    profile: Vc01Profile,
+}
+#[derive(Deserialize)]
+struct Vc01Profile {
+    gid: String,
+    name: String,
+    age: u32,
+    job: String,
+    balanceYen: i32,
+}
+
+#[derive(Deserialize)]
+struct VcCart {
+    #[serde(flatten)]
+    common: VcCommon,
+
+    vc: VcCredCart,
+}
+#[derive(Deserialize)]
+struct VcCredCart {
+    credentialSubject: Vc02PCart,
+
+    #[serde(flatten)]
+    extra: HashMap<String, Value>,
+}
+#[derive(Deserialize)]
+struct Vc02PCart {
+    cart: Vc02Cart,
+}
+#[derive(Deserialize)]
+struct Vc02Cart {
+    gid: String,
+    productName: String,
+    productPriceYen: i32,
+    productNumber: i32,
+}
+
+
+// Output Json Formats (to be VC as well)
 #[derive(Serialize)]
-struct OutputJson {
+struct OutputRegVC {
+    gid: String,
     sub: String,
-    age: i32,
+    name: String,
+    age: u32,
+    job: String,
+    balanceYen: i32,
+}
+
+#[derive(Serialize)]
+struct OutputReceiptVC {
+    gid: String,
+    sub: String,
+    ProductName: String,
+    productPriceYen: i32,
+    productNumber: i32,
+}
+
+#[derive(Serialize)]
+struct OutputSync {
+    gid: String,
+    amount: i32,
+    balanceYen: i32,
     adid: String,
 }
 
-#[get("/")]
-async fn top() -> impl Responder {
-    HttpResponse::Ok().body("Hello Top Page!")
+
+#[post("/register_profile")]
+async fn register_profile(vc_prof: web::Json<VcProfile>) -> impl Responder {
+
+    unsafe {
+
+        if let Some(conn) = &db_conn {
+            // todo: share db
+            conn.execute(
+                "CREATE TABLE kv_store (
+                          id              INTEGER PRIMARY KEY,
+                          gid             TEXT NOT NULL,
+                          sub             TEXT NOT NULL,
+                          name            TEXT,
+                          age             INTEGER,
+                          job             TEXT,
+                          balanceYen      INTEGER
+                          )",
+                params![],
+            ).unwrap();
+        }
+
+    }
+    web::Json(
+        OutputRegVC {
+        gid: vc_prof.vc.credentialSubject.profile.gid.clone(),
+        sub: vc_prof.common.sub.clone(),
+            name: vc_prof.vc.credentialSubject.profile.name.clone(),
+            age: vc_prof.vc.credentialSubject.profile.age,
+            job: vc_prof.vc.credentialSubject.profile.job.clone(),
+            balanceYen: vc_prof.vc.credentialSubject.profile.balanceYen,
+        }
+    )
 }
 
-#[post("/echo")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
+#[post("/register_cart")]
+async fn register_cart(vc_cart: web::Json<VcCart>) -> impl Responder {
+    web::Json(
+        OutputReceiptVC {
+            gid: vc_cart.vc.credentialSubject.cart.gid.clone(),
+            sub: vc_cart.common.sub.clone(),
+            ProductName: vc_cart.vc.credentialSubject.cart.productName.to_string(),
+            productPriceYen: vc_cart.vc.credentialSubject.cart.productPriceYen,
+            productNumber: vc_cart.vc.credentialSubject.cart.productNumber,
+        }
+    )
 }
 
-#[post("/json")]
-async fn json(vc01_in01: web::Json<Vc01In01>) -> impl Responder {
-    web::Json(OutputJson { adid: "testid".to_string(), sub: vc01_in01.sub.clone(), age: vc01_in01.vc.credentialSubject.profile.age})
-}
-
-#[get("/{id}/{name}")]
-async fn index(web::Path((id, name)): web::Path<(u32, String)>) -> impl Responder {
-    format!("Hello {}! id:{}", name, id)
+#[post("/sync")]
+async fn sync(gid: web::Form<SyncCredential>) -> impl Responder {
+    web::Json(
+        OutputSync {
+            gid: gid.gid.clone(),
+            amount: 9000,
+            balanceYen: 1000,
+            adid: "wine_ad".to_string(),
+        }
+    )
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+
+    unsafe {
+        db_conn = Connection::open_in_memory().ok();
+    }
 
     let addr_leader: &str = "0.0.0.0:8080";
     let addr: &str = "0.0.0.0:8081";
@@ -76,8 +189,9 @@ async fn main() -> std::io::Result<()> {
         if mode == "leader" {
             HttpServer::new(||
                             App::new()
-                            .service(top)
-                            .service(index)
+                            .service(register_profile)
+                            .service(register_cart)
+                            .service(sync)
                             )
                 .bind(addr_leader)?
                 .run()
@@ -86,9 +200,9 @@ async fn main() -> std::io::Result<()> {
             println!("Running \"default mode\"@port8081. (arg = {})", mode);
             HttpServer::new(||
                             App::new()
-                            .service(top)
-                            .service(echo)
-                            .service(json)
+                            .service(register_profile)
+                            .service(register_cart)
+                            .service(sync)
                             )
                 .bind(addr)?
                 .run()
@@ -99,13 +213,12 @@ async fn main() -> std::io::Result<()> {
         println!("No arg. Running \"default mode\"@port8081");
         HttpServer::new(||
                         App::new()
-                        .service(top)
-                        .service(echo)
-                        .service(json)
+                        .service(register_profile)
+                        .service(register_cart)
+                        .service(sync)
                         )
             .bind(addr)?
             .run()
             .await
     }
-
 }
