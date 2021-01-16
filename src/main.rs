@@ -16,7 +16,7 @@ struct Person {
 #[derive(Deserialize)]
 struct SyncCredential {
     gid: String,
-    //pwd: String,
+    pwd: String,
 }
 
 // Input (VC/Verified Credential) Formats
@@ -51,7 +51,6 @@ struct Vc01PProfile {
 }
 #[derive(Deserialize)]
 struct Vc01Profile {
-    gid: String,
     name: String,
     age: u32,
     job: String,
@@ -78,10 +77,20 @@ struct Vc02PCart {
 }
 #[derive(Deserialize)]
 struct Vc02Cart {
-    gid: String,
     productName: String,
     productPriceYen: i32,
     productNumber: i32,
+}
+
+#[derive(Deserialize)]
+struct RegProfReq {
+    gid: String,
+    json_base64: String,
+}
+#[derive(Deserialize)]
+struct RegCartReq {
+    gid: String,
+    json_base64: String,
 }
 
 
@@ -113,9 +122,9 @@ struct OutputSync {
     adid: String,
 }
 
-
 #[post("/register_profile")]
-async fn register_profile(vc_prof: web::Json<VcProfile>) -> impl Responder {
+async fn register_profile(req: web::Form<RegProfReq>) -> impl Responder {
+    let vc_prof:VcProfile = serde_json::from_str(&req.json_base64).unwrap();
 
     unsafe {
 
@@ -138,7 +147,7 @@ async fn register_profile(vc_prof: web::Json<VcProfile>) -> impl Responder {
     }
     web::Json(
         OutputRegVC {
-        gid: vc_prof.vc.credentialSubject.profile.gid.clone(),
+        gid: req.gid.clone(),
         sub: vc_prof.common.sub.clone(),
             name: vc_prof.vc.credentialSubject.profile.name.clone(),
             age: vc_prof.vc.credentialSubject.profile.age,
@@ -149,10 +158,12 @@ async fn register_profile(vc_prof: web::Json<VcProfile>) -> impl Responder {
 }
 
 #[post("/register_cart")]
-async fn register_cart(vc_cart: web::Json<VcCart>) -> impl Responder {
+async fn register_cart(req: web::Form<RegCartReq>) -> impl Responder {
+    let vc_cart: VcCart = serde_json::from_str(&req.json_base64).unwrap();
+
     web::Json(
         OutputReceiptVC {
-            gid: vc_cart.vc.credentialSubject.cart.gid.clone(),
+            gid: req.gid.clone(),
             sub: vc_cart.common.sub.clone(),
             ProductName: vc_cart.vc.credentialSubject.cart.productName.to_string(),
             productPriceYen: vc_cart.vc.credentialSubject.cart.productPriceYen,
@@ -162,15 +173,26 @@ async fn register_cart(vc_cart: web::Json<VcCart>) -> impl Responder {
 }
 
 #[post("/sync")]
-async fn sync(gid: web::Form<SyncCredential>) -> impl Responder {
-    web::Json(
-        OutputSync {
-            gid: gid.gid.clone(),
-            amount: 9000,
-            balanceYen: 1000,
-            adid: "wine_ad".to_string(),
-        }
-    )
+async fn sync(cred: web::Form<SyncCredential>) -> impl Responder {
+    if cred.pwd == "testpwd" {
+        web::Json(
+            OutputSync {
+                gid: cred.gid.clone(),
+                amount: 9000,
+                balanceYen: 1000,
+                adid: "wine_ad".to_string(),
+            }
+        )
+    } else {
+        web::Json(
+            OutputSync {
+                gid: "".to_string(),
+                amount: 0,
+                balanceYen: 0,
+                adid: "default_ad".to_string(),
+            }
+        )
+    }
 }
 
 #[actix_web::main]
