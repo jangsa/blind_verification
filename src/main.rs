@@ -124,31 +124,35 @@ struct OutputSync {
 
 #[post("/register_profile")]
 async fn register_profile(req: web::Form<RegProfReq>) -> impl Responder {
-    let vc_prof:VcProfile = serde_json::from_str(&req.json_base64).unwrap();
+    let vc_prof: VcProfile = serde_json::from_str(&req.json_base64).unwrap();
 
     unsafe {
-
         if let Some(conn) = &db_conn {
-            // todo: share db
             conn.execute(
-                "CREATE TABLE kv_store (
-                          id              INTEGER PRIMARY KEY,
-                          gid             TEXT NOT NULL,
-                          sub             TEXT NOT NULL,
-                          name            TEXT,
-                          age             INTEGER,
-                          job             TEXT,
-                          balanceYen      INTEGER
-                          )",
-                params![],
+                "INSERT INTO sharedb
+                    (pwd, sub, name, age, job, balanceYen,
+                     productName, productPriceYen, productNumber)
+                VALUES
+                    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    vc_prof.common.sub.clone(),
+                    Some("".to_string()),
+                    Some(vc_prof.vc.credentialSubject.profile.name.clone()),
+                    Some(vc_prof.vc.credentialSubject.profile.age),
+                    Some(vc_prof.vc.credentialSubject.profile.job.clone()),
+                    Some(vc_prof.vc.credentialSubject.profile.balanceYen),
+                    Some("".to_string()),
+                    Some("".to_string()),
+                    Some(0)
+                ]
             ).unwrap();
         }
-
     }
+
     web::Json(
         OutputRegVC {
-        gid: req.gid.clone(),
-        sub: vc_prof.common.sub.clone(),
+            gid: req.gid.clone(),
+            sub: vc_prof.common.sub.clone(),
             name: vc_prof.vc.credentialSubject.profile.name.clone(),
             age: vc_prof.vc.credentialSubject.profile.age,
             job: vc_prof.vc.credentialSubject.profile.job.clone(),
@@ -160,6 +164,9 @@ async fn register_profile(req: web::Form<RegProfReq>) -> impl Responder {
 #[post("/register_cart")]
 async fn register_cart(req: web::Form<RegCartReq>) -> impl Responder {
     let vc_cart: VcCart = serde_json::from_str(&req.json_base64).unwrap();
+
+    unsafe {
+    }
 
     web::Json(
         OutputReceiptVC {
@@ -175,6 +182,8 @@ async fn register_cart(req: web::Form<RegCartReq>) -> impl Responder {
 #[post("/sync")]
 async fn sync(cred: web::Form<SyncCredential>) -> impl Responder {
     if cred.pwd == "testpwd" {
+        // todo: query
+
         web::Json(
             OutputSync {
                 gid: cred.gid.clone(),
@@ -200,6 +209,25 @@ async fn main() -> std::io::Result<()> {
 
     unsafe {
         db_conn = Connection::open_in_memory().ok();
+
+        if let Some(conn) = &db_conn {
+            conn.execute(
+                "CREATE TABLE sharedb (
+                    gid             INT IDENTITY(1,1) PRIMARY KEY,
+                    pwd             TEXT,
+                    sub             TEXT NOT NULL,
+                    name            TEXT,
+                    age             INTEGER,
+                    job             TEXT,
+                    balanceYen      INTEGER,
+                    productName     TEXT,
+                    productPriceYen TEXT,
+                    productNumber   INTEGER
+                 )",
+                params![],
+            ).unwrap();
+        }
+
     }
 
     let addr_leader: &str = "0.0.0.0:8080";
