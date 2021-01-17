@@ -6,16 +6,9 @@ use rusqlite::{params, Connection, Result};
 
 static mut db_conn: Option<rusqlite::Connection> = None;
 
-#[derive(Debug)]
-struct Person {
-    id: i32,
-    name: String,
-    data: Option<Vec<u8>>,
-}
-
 #[derive(Deserialize)]
 struct SyncCredential {
-    gid: String,
+    gid: u32,
     pwd: String,
 }
 
@@ -83,21 +76,17 @@ struct Vc02Cart {
 }
 
 #[derive(Deserialize)]
-struct RegProfReq {
-    gid: String,
-    json_base64: String,
-}
-#[derive(Deserialize)]
-struct RegCartReq {
-    gid: String,
-    json_base64: String,
+struct RegisterRequest {
+    gid: u32,
+    vc_prof: String,
+    vc_cart: String,
 }
 
 
 // Output Json Formats (to be VC as well)
 #[derive(Serialize)]
 struct OutputRegVC {
-    gid: String,
+    gid: u32,
     sub: String,
     name: String,
     age: u32,
@@ -105,26 +94,37 @@ struct OutputRegVC {
     balanceYen: i32,
 }
 
+#[derive(Debug, Default)]
+struct PersonalParams {
+    age: u32,
+    job: String,
+    balanceYen: i32,
+    productName: String,
+    productPriceYen: i32,
+    productNumber: i32,
+    gid: u32,
+}
+
 #[derive(Serialize)]
 struct OutputReceiptVC {
-    gid: String,
+    gid: u32,
     sub: String,
     ProductName: String,
     productPriceYen: i32,
     productNumber: i32,
 }
 
-#[derive(Serialize)]
+#[derive(Default, Serialize)]
 struct OutputSync {
-    gid: String,
+    gid: u32,
     amount: i32,
-    balanceYen: i32,
     adid: String,
 }
 
-#[post("/register_profile")]
-async fn register_profile(req: web::Form<RegProfReq>) -> impl Responder {
-    let vc_prof: VcProfile = serde_json::from_str(&req.json_base64).unwrap();
+#[post("/register")]
+async fn register(req: web::Form<RegisterRequest>) -> impl Responder {
+    let vc_prof: VcProfile = serde_json::from_str(&req.vc_prof).unwrap();
+    let vc_cart: VcCart = serde_json::from_str(&req.vc_cart).unwrap();
 
     unsafe {
         if let Some(conn) = &db_conn {
@@ -141,9 +141,9 @@ async fn register_profile(req: web::Form<RegProfReq>) -> impl Responder {
                     Some(vc_prof.vc.credentialSubject.profile.age),
                     Some(vc_prof.vc.credentialSubject.profile.job.clone()),
                     Some(vc_prof.vc.credentialSubject.profile.balanceYen),
-                    Some("".to_string()),
-                    Some("".to_string()),
-                    Some(0)
+                    Some(vc_cart.vc.credentialSubject.cart.productName.to_string()),
+                    Some(vc_cart.vc.credentialSubject.cart.productPriceYen),
+                    Some(vc_cart.vc.credentialSubject.cart.productNumber)
                 ]
             ).unwrap();
         }
@@ -151,7 +151,7 @@ async fn register_profile(req: web::Form<RegProfReq>) -> impl Responder {
 
     web::Json(
         OutputRegVC {
-            gid: req.gid.clone(),
+            gid: 1, // todo: get id of registered row
             sub: vc_prof.common.sub.clone(),
             name: vc_prof.vc.credentialSubject.profile.name.clone(),
             age: vc_prof.vc.credentialSubject.profile.age,
@@ -161,47 +161,70 @@ async fn register_profile(req: web::Form<RegProfReq>) -> impl Responder {
     )
 }
 
-#[post("/register_cart")]
-async fn register_cart(req: web::Form<RegCartReq>) -> impl Responder {
-    let vc_cart: VcCart = serde_json::from_str(&req.json_base64).unwrap();
+fn getGroup(gid: u32) -> PersonalParams {
 
     unsafe {
+
+        if let Some(conn) = &db_conn {
+        
+            let mut q = conn.prepare(
+                "SELECT
+                    age, job, balanceYen,
+                    productName, productPriceYen, productNumber
+                    ,gid
+                FROM sharedb
+                WHERE gid = :gid"
+                ).unwrap();
+        
+            let mut pp_iter = q.query_map_named(
+                &[(":gid", &gid)],
+                |row| {
+                    Ok(
+                        PersonalParams {
+                            age: row.get(0)?,
+                            job: row.get(1)?,
+                            balanceYen: row.get(2)?,
+                            productName: row.get(3)?,
+                            productPriceYen: row.get(4)?,
+                            productNumber: row.get(5)?,
+                            gid: row.get(6)?,
+                        }
+                    )
+                }).unwrap();
+
+            pp_iter.next().unwrap().unwrap()
+        
+        } else {
+
+            Default::default()
+
+        }
     }
 
-    web::Json(
-        OutputReceiptVC {
-            gid: req.gid.clone(),
-            sub: vc_cart.common.sub.clone(),
-            ProductName: vc_cart.vc.credentialSubject.cart.productName.to_string(),
-            productPriceYen: vc_cart.vc.credentialSubject.cart.productPriceYen,
-            productNumber: vc_cart.vc.credentialSubject.cart.productNumber,
-        }
-    )
 }
 
 #[post("/sync")]
 async fn sync(cred: web::Form<SyncCredential>) -> impl Responder {
-    if cred.pwd == "testpwd" {
-        // todo: query
 
-        web::Json(
-            OutputSync {
-                gid: cred.gid.clone(),
-                amount: 9000,
-                balanceYen: 1000,
-                adid: "wine_ad".to_string(),
-            }
-        )
-    } else {
-        web::Json(
-            OutputSync {
-                gid: "".to_string(),
-                amount: 0,
-                balanceYen: 0,
-                adid: "default_ad".to_string(),
-            }
-        )
-    }
+    let grp = getGroup(cred.gid);
+
+    // todo: implement below by MPC
+    let amount = grp.balanceYen - grp.productPriceYen * grp.productNumber;
+    let adid =
+        if grp.age >= 20 {
+            "beer_ad".to_string()
+        } else {
+            "juice_ad".to_string()
+        };
+
+    web::Json(
+        OutputSync {
+            gid: cred.gid,
+            amount: amount,
+            adid: adid,
+        }
+    )
+
 }
 
 #[actix_web::main]
@@ -213,7 +236,7 @@ async fn main() -> std::io::Result<()> {
         if let Some(conn) = &db_conn {
             conn.execute(
                 "CREATE TABLE sharedb (
-                    gid             INT IDENTITY(1,1) PRIMARY KEY,
+                    gid             INTEGER PRIMARY KEY,
                     pwd             TEXT,
                     sub             TEXT NOT NULL,
                     name            TEXT,
@@ -221,7 +244,7 @@ async fn main() -> std::io::Result<()> {
                     job             TEXT,
                     balanceYen      INTEGER,
                     productName     TEXT,
-                    productPriceYen TEXT,
+                    productPriceYen INTEGER,
                     productNumber   INTEGER
                  )",
                 params![],
@@ -239,8 +262,7 @@ async fn main() -> std::io::Result<()> {
         if mode == "leader" {
             HttpServer::new(||
                             App::new()
-                            .service(register_profile)
-                            .service(register_cart)
+                            .service(register)
                             .service(sync)
                             )
                 .bind(addr_leader)?
@@ -250,8 +272,7 @@ async fn main() -> std::io::Result<()> {
             println!("Running \"default mode\"@port8081. (arg = {})", mode);
             HttpServer::new(||
                             App::new()
-                            .service(register_profile)
-                            .service(register_cart)
+                            .service(register)
                             .service(sync)
                             )
                 .bind(addr)?
@@ -263,8 +284,7 @@ async fn main() -> std::io::Result<()> {
         println!("No arg. Running \"default mode\"@port8081");
         HttpServer::new(||
                         App::new()
-                        .service(register_profile)
-                        .service(register_cart)
+                        .service(register)
                         .service(sync)
                         )
             .bind(addr)?
