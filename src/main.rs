@@ -8,7 +8,7 @@ static mut db_conn: Option<rusqlite::Connection> = None;
 
 #[derive(Deserialize)]
 struct SyncCredential {
-    gid: u32,
+    gid: i64,
     pwd: String,
 }
 
@@ -77,7 +77,7 @@ struct Vc02Cart {
 
 #[derive(Deserialize)]
 struct RegisterRequest {
-    gid: u32,
+    gid: i64,
     vc_prof: String,
     vc_cart: String,
 }
@@ -86,7 +86,7 @@ struct RegisterRequest {
 // Output Json Formats (to be VC as well)
 #[derive(Serialize)]
 struct OutputRegVC {
-    gid: u32,
+    gid: i64,
     sub: String,
     name: String,
     age: u32,
@@ -102,12 +102,12 @@ struct PersonalParams {
     productName: String,
     productPriceYen: i32,
     productNumber: i32,
-    gid: u32,
+    gid: i64,
 }
 
 #[derive(Serialize)]
 struct OutputReceiptVC {
-    gid: u32,
+    gid: i64,
     sub: String,
     ProductName: String,
     productPriceYen: i32,
@@ -116,19 +116,17 @@ struct OutputReceiptVC {
 
 #[derive(Default, Serialize)]
 struct OutputSync {
-    gid: u32,
+    gid: i64,
     amount: i32,
     adid: String,
 }
 
-#[post("/register")]
-async fn register(req: web::Form<RegisterRequest>) -> impl Responder {
-    let vc_prof: VcProfile = serde_json::from_str(&req.vc_prof).unwrap();
-    let vc_cart: VcCart = serde_json::from_str(&req.vc_cart).unwrap();
-
+fn insert(vc_prof: &VcProfile, vc_cart: &VcCart) -> Result<i64, rusqlite::Error> {
     unsafe {
-        if let Some(conn) = &db_conn {
-            conn.execute(
+        if let Some(conn) = &mut db_conn {
+            let tx = conn.transaction()?;
+        
+            tx.execute(
                 "INSERT INTO sharedb
                     (pwd, sub, name, age, job, balanceYen,
                      productName, productPriceYen, productNumber)
@@ -145,13 +143,29 @@ async fn register(req: web::Form<RegisterRequest>) -> impl Responder {
                     Some(vc_cart.vc.credentialSubject.cart.productPriceYen),
                     Some(vc_cart.vc.credentialSubject.cart.productNumber)
                 ]
-            ).unwrap();
+            )?;
+        
+            let last_id = tx.last_insert_rowid();
+
+            tx.commit()?;
+
+            Ok(last_id)
+        } else {
+            Ok(0)
         }
     }
+}
+
+#[post("/register")]
+async fn register(req: web::Form<RegisterRequest>) -> impl Responder {
+    let vc_prof: VcProfile = serde_json::from_str(&req.vc_prof).unwrap();
+    let vc_cart: VcCart = serde_json::from_str(&req.vc_cart).unwrap();
+
+    let last_id = insert(&vc_prof, &vc_cart).unwrap();
 
     web::Json(
         OutputRegVC {
-            gid: 1, // todo: get id of registered row
+            gid: last_id,
             sub: vc_prof.common.sub.clone(),
             name: vc_prof.vc.credentialSubject.profile.name.clone(),
             age: vc_prof.vc.credentialSubject.profile.age,
@@ -161,7 +175,7 @@ async fn register(req: web::Form<RegisterRequest>) -> impl Responder {
     )
 }
 
-fn getGroup(gid: u32) -> PersonalParams {
+fn getGroup(gid: i64) -> PersonalParams {
 
     unsafe {
 
@@ -209,7 +223,7 @@ async fn sync(cred: web::Form<SyncCredential>) -> impl Responder {
     let grp = getGroup(cred.gid);
 
     // todo: implement below by MPC
-    let amount = grp.balanceYen - grp.productPriceYen * grp.productNumber;
+    let amount = grp.productPriceYen * grp.productNumber;
     let adid =
         if grp.age >= 20 {
             "beer_ad".to_string()
