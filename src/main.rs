@@ -121,35 +121,40 @@ struct OutputSync {
     adid: String,
 }
 
-fn insert(vc_prof: &VcProfile, vc_cart: &VcCart) -> Result<i64, rusqlite::Error> {
+fn insert(gid: i64, vc_prof: &VcProfile, vc_cart: &VcCart) -> Result<i64, rusqlite::Error> {
     unsafe {
         if let Some(conn) = &mut db_conn {
             let tx = conn.transaction()?;
         
-            tx.execute(
-                "INSERT INTO sharedb
-                    (pwd, sub, name, age, job, balanceYen,
-                     productName, productPriceYen, productNumber)
-                VALUES
-                    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![
-                    vc_prof.common.sub.clone(),
-                    Some("".to_string()),
-                    Some(vc_prof.vc.credentialSubject.profile.name.clone()),
-                    Some(vc_prof.vc.credentialSubject.profile.age),
-                    Some(vc_prof.vc.credentialSubject.profile.job.clone()),
-                    Some(vc_prof.vc.credentialSubject.profile.balanceYen),
-                    Some(vc_cart.vc.credentialSubject.cart.productName.to_string()),
-                    Some(vc_cart.vc.credentialSubject.cart.productPriceYen),
-                    Some(vc_cart.vc.credentialSubject.cart.productNumber)
-                ]
-            )?;
-        
-            let last_id = tx.last_insert_rowid();
+            let last_gid = if gid == 0 {
+                tx.execute(
+                    "INSERT INTO sharedb
+                        (pwd, sub, name, age, job, balanceYen,
+                         productName, productPriceYen, productNumber)
+                    VALUES
+                        (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        Some("testpwd".to_string()),
+                        vc_prof.common.sub.clone(),
+                        Some(vc_prof.vc.credentialSubject.profile.name.clone()),
+                        Some(vc_prof.vc.credentialSubject.profile.age),
+                        Some(vc_prof.vc.credentialSubject.profile.job.clone()),
+                        Some(vc_prof.vc.credentialSubject.profile.balanceYen),
+                        Some(vc_cart.vc.credentialSubject.cart.productName.to_string()),
+                        Some(vc_cart.vc.credentialSubject.cart.productPriceYen),
+                        Some(vc_cart.vc.credentialSubject.cart.productNumber)
+                    ]
+                )?;
+            
+                tx.last_insert_rowid()
+            } else {
+                // todo: update where gid = gid
+                gid
+            };
 
             tx.commit()?;
 
-            Ok(last_id)
+            Ok(last_gid)
         } else {
             Ok(0)
         }
@@ -161,11 +166,11 @@ async fn register(req: web::Form<RegisterRequest>) -> impl Responder {
     let vc_prof: VcProfile = serde_json::from_str(&req.vc_prof).unwrap();
     let vc_cart: VcCart = serde_json::from_str(&req.vc_cart).unwrap();
 
-    let last_id = insert(&vc_prof, &vc_cart).unwrap();
+    let last_gid = insert(req.gid, &vc_prof, &vc_cart).unwrap();
 
     web::Json(
         OutputRegVC {
-            gid: last_id,
+            gid: last_gid,
             sub: vc_prof.common.sub.clone(),
             name: vc_prof.vc.credentialSubject.profile.name.clone(),
             age: vc_prof.vc.credentialSubject.profile.age,
